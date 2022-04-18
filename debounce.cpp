@@ -74,6 +74,7 @@ uint8_t Debounce::isPressed(void)
     return _pressed;
 }
 
+/* 
 uint8_t Debounce::isReleased(void)
 {
     uint8_t _released = 0;
@@ -88,7 +89,6 @@ uint8_t Debounce::isReleased(void)
 
 uint8_t Debounce::isDown(void)
 {
-
 	return (_buttonHistory == DOWN);
 }
 
@@ -96,3 +96,4 @@ uint8_t Debounce::isUp(void)
 {
 	return (_buttonHistory == UP);
 }
+ */

@@ -24,15 +24,15 @@ class Debounce
 {
 	public:
 		// Constructors
-		Debounce(uint8_t buttonPin);		// Defaults to Active HIGH logic
+		Debounce(uint8_t buttonPin);		// Default active HIGH logic
 
 		Debounce(uint8_t buttonPin, uint8_t activeLevel);
 
 		void update(void);
-		uint8_t isUp(void);
-		uint8_t isDown(void);
 		uint8_t isPressed(void);
-		uint8_t isReleased(void);
+		// uint8_t isUp(void);
+		// uint8_t isDown(void);
+		// uint8_t isReleased(void);
 
 	protected:
 
