@@ -43,8 +43,8 @@ void IRAM_ATTR timerISR0()
 void setup()
 {
 	Serial.begin(115200);					// Starts serial monitor
-	pinMode(LED, OUTPUT);				// Declare pin as digital output
-	digitalWrite(LED, LOW);				// Start with LED off
+	pinMode(LED, OUTPUT);					// Declare pin as digital output
+	digitalWrite(LED, LOW);					// Start with LED off
 	pinMode(BUTTON, INPUT);					// Declare pin as digital input
 	pinMode(LED_BUILTIN, OUTPUT);			// LED digital pin as an output
 
