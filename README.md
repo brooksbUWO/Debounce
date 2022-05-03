@@ -1,7 +1,7 @@
 # Debounce
 A Debounce class for GPIO on Espressif ESP32. 
 
-This code is based on the following sources (pdf files of these are in the resources directory):
+This code is based on the following sources (pdf files are in the resources directory):
 
 http://www.ganssle.com/debouncing.htm
 
