@@ -27,16 +27,16 @@
 
 // Constructors
 // ****************************************************************************
-Debounce::Debounce(uint8_t buttonPin)		// Pin to debounce
+Debounce::Debounce(uint8_t buttonPin)
 {
-    _button = buttonPin;
-	_active = HIGH;
+    _button = buttonPin;	// Pin to debounce
+	_logicLevel = HIGH;		// Defaul logic level
 }
 
 Debounce::Debounce(uint8_t buttonPin, uint8_t logicLevel)
 {
-    _button = buttonPin;
-	_active = logicLevel;					// LOW or HIGH
+    _button = buttonPin;		// Pin to debounce
+	_logicLevel = logicLevel;	// LOW or HIGH
 }
 
 
@@ -45,18 +45,18 @@ Debounce::Debounce(uint8_t buttonPin, uint8_t logicLevel)
 uint8_t Debounce::readButton(void)
 {
 	uint8_t result = false;
-	if(_active == LOW && digitalRead(_button) == LOW)
+	if(_logicLevel == LOW && digitalRead(_button) == LOW)
 	{
 		result = true;
 	}
-	else if(_active == HIGH && digitalRead(_button) == HIGH)
+	else if(_logicLevel == HIGH && digitalRead(_button) == HIGH)
 	{
 		result = true;
 	}
     return result;
 }
 
-void Debounce::update(void)
+void Debounce::update(uint8_t *history)
 {
     _buttonHistory = (_buttonHistory << 1);
     _buttonHistory |= readButton();
@@ -74,7 +74,6 @@ uint8_t Debounce::isPressed(void)
     return _pressed;
 }
 
-/* 
 uint8_t Debounce::isReleased(void)
 {
     uint8_t _released = 0;
@@ -89,11 +88,11 @@ uint8_t Debounce::isReleased(void)
 
 uint8_t Debounce::isDown(void)
 {
+
 	return (_buttonHistory == DOWN);
 }
 
-uint8_t Debounce::isUp(void)
+uint8_t Debounce::is_up(void)
 {
 	return (_buttonHistory == UP);
 }
- */
