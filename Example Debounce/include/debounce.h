@@ -12,27 +12,29 @@
 // 14-APR-2022	brooks		program start
 // ****************************************************************************
 
+#ifndef debounce_H
+#define debounce_H
+#pragma once
+
 // Include Files
 // ****************************************************************************
 #include <Arduino.h>
 
-#ifndef debounce_H
-#define debounce_H
-
-
+// Class
+// ****************************************************************************
 class Debounce
 {
 	public:
 		// Constructors
-		Debounce(uint8_t buttonPin);		// Default active HIGH logic
+		Debounce(uint8_t buttonPin);		// Defaults to Active HIGH logic
 
 		Debounce(uint8_t buttonPin, uint8_t activeLevel);
 
 		void update(void);
+		uint8_t isUp(void);
+		uint8_t isDown(void);
 		uint8_t isPressed(void);
-		// uint8_t isUp(void);
-		// uint8_t isDown(void);
-		// uint8_t isReleased(void);
+		uint8_t isReleased(void);
 
 	protected:
 
@@ -40,7 +42,7 @@ class Debounce
 		uint8_t _histSize=0;
 		uint8_t _buttonHistory=0;
 		uint8_t _button=0;
-		uint8_t _active=0;
+		uint8_t _logicLevel=0;
 
 		uint8_t readButton(void);
 };
