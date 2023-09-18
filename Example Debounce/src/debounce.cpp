@@ -30,13 +30,13 @@
 Debounce::Debounce(uint8_t buttonPin)		// Pin to debounce
 {
     _button = buttonPin;
-	_active = HIGH;
+	_logicLevel = HIGH;
 }
 
 Debounce::Debounce(uint8_t buttonPin, uint8_t logicLevel)
 {
     _button = buttonPin;
-	_active = logicLevel;					// LOW or HIGH
+	_logicLevel = logicLevel;					// LOW or HIGH
 }
 
 
@@ -45,11 +45,11 @@ Debounce::Debounce(uint8_t buttonPin, uint8_t logicLevel)
 uint8_t Debounce::readButton(void)
 {
 	uint8_t result = false;
-	if(_active == LOW && digitalRead(_button) == LOW)
+	if(_logicLevel == LOW && digitalRead(_button) == LOW)
 	{
 		result = true;
 	}
-	else if(_active == HIGH && digitalRead(_button) == HIGH)
+	else if(_logicLevel == HIGH && digitalRead(_button) == HIGH)
 	{
 		result = true;
 	}
@@ -74,7 +74,7 @@ uint8_t Debounce::isPressed(void)
     return _pressed;
 }
 
-/* 
+
 uint8_t Debounce::isReleased(void)
 {
     uint8_t _released = 0;
@@ -96,4 +96,3 @@ uint8_t Debounce::isUp(void)
 {
 	return (_buttonHistory == UP);
 }
- */
