@@ -50,7 +50,7 @@ void setup()
 
 	timer0 = timerBegin(0, 80, true); // 80MHz/80 prescaler=1 MHz
 	timerAttachInterrupt(timer0, &timerISR0, true);
-	timerAlarmWrite(timer0, 10000, true); // ISR 1ms
+	timerAlarmWrite(timer0, 1000, true); // ISR 1ms
 	timerAlarmEnable(timer0);			  // Enable ISR
 }
 
