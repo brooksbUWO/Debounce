@@ -24,27 +24,26 @@
 // ****************************************************************************
 class Debounce
 {
-	public:
-		// Constructors
-		Debounce(uint8_t buttonPin);		// Defaults to Active HIGH logic
+public:
+	// Constructors
+	Debounce(uint8_t buttonPin); // Defaults to Active HIGH logic
 
-		Debounce(uint8_t buttonPin, uint8_t activeLevel);
+	Debounce(uint8_t buttonPin, uint8_t activeLevel);
 
-		void update(void);
-		uint8_t isUp(void);
-		uint8_t isDown(void);
-		uint8_t isPressed(void);
-		uint8_t isReleased(void);
+	void update(void);
+	uint8_t isUp(void);
+	uint8_t isDown(void);
+	uint8_t isPressed(void);
+	uint8_t isReleased(void);
 
-	protected:
+protected:
+private:
+	uint8_t _histSize = 0;
+	uint8_t _buttonHistory = 0;
+	uint8_t _button = 0;
+	uint8_t _logicLevel = 0;
 
-	private:
-		uint8_t _histSize=0;
-		uint8_t _buttonHistory=0;
-		uint8_t _button=0;
-		uint8_t _logicLevel=0;
-
-		uint8_t readButton(void);
+	uint8_t readButton(void);
 };
 
-#endif										// debounce_H
+#endif // debounce_H
