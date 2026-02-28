@@ -1,6 +1,6 @@
 # Debounce16 Library
 
-A robust 16-bit pattern-based button debouncing library for ESP32 microcontrollers using the Arduino framework.
+A robust 16-bit pattern-based button debouncing library for ESP32 microcontrollers using the Arduino or ESP-IDF frameworks.
 
 ## Features
 
@@ -119,6 +119,71 @@ void loop() {
 }
 ```
 
+### Using Hardware Timer Interrupt with latest Arduino
+
+```cpp
+#include <Debounce16.h>
+
+const uint8_t PIN_BUTTON = 17;
+Debounce16 button(PIN_BUTTON, HIGH);
+
+hw_timer_t *timer = NULL;
+
+void IRAM_ATTR onTimer() {
+    button.update();  // Update at precise 1ms intervals
+}
+
+void setup() {
+    // Configure timer for 1 MHz and callback every 1000 ticks
+    timer = timerBegin(1000000); // 1 MHz
+    timerAttachInterrupt(timer, &onTimer);
+    timerAlarm(buttonTimer, 1000, true, 0);  // 1ms, autoreload, forever
+}
+
+void loop() {
+    if (button.isPressed()) {
+        // Handle button press
+    }
+}
+```
+
+### Using Hardware Timer Interrupt with ESP-IDF
+
+```cpp
+#include <Debounce16.h>
+
+#include "esp_timer.h"
+
+const uint8_t PIN_BUTTON = 17;
+Debounce16 button(PIN_BUTTON, DB_HIGH);
+
+hw_timer_t *timer = NULL;
+
+void IRAM_ATTR onTimer(void *) {
+    button.update();  // Update at precise 1ms intervals
+}
+
+void setup() {
+  const esp_timer_create_args_t timer_args = {
+    .callback = &onButtonTimer,
+    .arg = NULL,
+    .dispatch_method = ESP_TIMER_TASK,
+    .name = "Debounce16",
+    .skip_unhandled_events = true
+  };
+  esp_timer_handle_t timer_handler;
+
+  ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer_handler));
+  ESP_ERROR_CHECK(esp_timer_start_periodic(timer_handler, 1000));
+}
+
+void loop() {
+    if (button.isPressed()) {
+        // Handle button press
+    }
+}
+```
+
 ## Advanced Features
 
 ### Double Press Detection
@@ -202,11 +267,11 @@ void loop() {
 ### Constructor
 
 ```cpp
-Debounce16(uint8_t pin, bool activeLevel = HIGH)
+Debounce16(uint8_t|gpio_num_t pin, bool activeLevel = DB_HIGH)
 ```
 
 - `pin`: GPIO pin number where button is connected
-- `activeLevel`: Logic level when button is pressed (HIGH or LOW)
+- `activeLevel`: Logic level when button is pressed (DB_HIGH or DB_LOW)
 
 ### Core Methods
 
@@ -251,18 +316,18 @@ The library uses a 16-bit shift register to store the last 16 button state readi
 
 ### Press Detection Pattern
 
-A press is detected when the last 6 bits are all HIGH (button pressed) after being LOW:
+A press is detected when the latest 6 bits are all HIGH (button pressed) after being LOW (with some possible bounce in between, the "don't cares" being indicated as x):
 ```
-0b0000000000111111 = 0x003F
+0b00000xxxxx111111
 ```
 
 This means the button must be consistently pressed for at least 6ms before being recognized.
 
 ### Release Detection Pattern
 
-A release is detected when the first 6 bits are all HIGH (button was pressed) and the rest are LOW:
+A release is detected when the latest 6 bits are all LOW (button not pressed) and the rest are HIGH (with some possible bounce in between, the "don't cares" being indicated as x):
 ```
-0b1111110000000000 = 0xFC00
+0b11111xxxxx000000
 ```
 
 This provides excellent noise immunity while maintaining fast response times.

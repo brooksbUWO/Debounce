@@ -8,8 +8,21 @@
 // When         Who         Description of change
 // -----------  ----------- -----------------------
 // 30-SEP-2025  Brooks      Initial implementation
+// 28-FEB-2026  davidc      Updates to work under ESP-IDF without Arduino
+// 28-FEB-2026  davidc      Update masks to make press/release/up/down consistent
 //
 // ****************************************************************************
+
+#ifndef ARDUINO
+#ifdef IDF_VER
+#include "esp_timer.h"
+
+uint32_t millis()
+{
+  return esp_timer_get_time() / 1000;
+}
+#endif
+#endif
 
 // Include Files
 // ****************************************************************************
@@ -17,7 +30,7 @@
 
 // Constructor Implementation
 // ****************************************************************************
-Debounce16::Debounce16(uint8_t pin, bool activeLevel)
+Debounce16::Debounce16(db_pin_t pin, bool activeLevel)
 {
     pinButton = pin;                        // Store GPIO pin number
     levelActive = activeLevel;              // Store active logic level
@@ -51,6 +64,7 @@ Debounce16::Debounce16(uint8_t pin, bool activeLevel)
     callbackLongPressEnd = nullptr;         // No long-press end callback
 
     // Configure GPIO pin
+#ifdef ARDUINO
     if (levelActive == HIGH)
     {
         pinMode(pin, INPUT);                // Active HIGH: use INPUT mode
@@ -59,6 +73,16 @@ Debounce16::Debounce16(uint8_t pin, bool activeLevel)
     {
         pinMode(pin, INPUT_PULLUP);         // Active LOW: use INPUT_PULLUP
     }
+#elifdef IDF_VER
+    gpio_config_t io_conf = {
+      .pin_bit_mask = (1ULL << pin),
+      .mode = GPIO_MODE_INPUT,
+      .pull_up_en = (levelActive == DB_HIGH ? GPIO_PULLUP_DISABLE : GPIO_PULLUP_ENABLE),
+      .pull_down_en = GPIO_PULLDOWN_DISABLE,
+      .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&io_conf);
+#endif
 }
 
 // Core Debouncing Methods Implementation
@@ -144,7 +168,7 @@ bool Debounce16::isReleased()
 // ****************************************************************************
 bool Debounce16::isDown()
 {
-    return (historyButton == PATTERN_DOWN); // All 16 bits set = button down
+    return (historyButton & MASK_DOWN_UP) == PATTERN_DOWN; // Recent bits are set = button down
 }
 
 // ****************************************************************************
@@ -155,7 +179,7 @@ bool Debounce16::isDown()
 // ****************************************************************************
 bool Debounce16::isUp()
 {
-    return (historyButton == PATTERN_UP);   // All 16 bits clear = button up
+    return (historyButton & MASK_DOWN_UP) == PATTERN_UP;  // Recent bits are clear = button up
 }
 
 // Advanced Feature Configuration Implementation
@@ -336,10 +360,14 @@ void Debounce16::onLongPressEnd(void (*callback)())
 // ****************************************************************************
 bool Debounce16::readButtonRaw()
 {
+#ifdef ARDUINO
     bool stateRaw = digitalRead(pinButton); // Read physical button state
+#else
+    bool stateRaw = gpio_get_level(pinButton);  // Read physical button state
+#endif
 
     // Account for active logic level
-    if (levelActive == HIGH)
+    if (levelActive == DB_HIGH)
     {
         return stateRaw;                    // Active HIGH: return as-is
     }

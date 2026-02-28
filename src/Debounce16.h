@@ -17,6 +17,7 @@
 // When         Who         Description of change
 // -----------  ----------- -----------------------
 // 30-SEP-2025  Brooks      Initial implementation
+// 28-FEB-2026  davidc      Updates to work under ESP-IDF without Arduino
 //
 // ****************************************************************************
 
@@ -25,7 +26,29 @@
 
 // Include Files
 // ****************************************************************************
+#ifdef ARDUINO
+
 #include <Arduino.h>
+
+typedef uint8_t db_pin_t;
+
+#define DB_HIGH HIGH
+#define DB_LOW LOW
+
+#elifdef IDF_VER
+
+#include "driver/gpio.h"
+
+typedef gpio_num_t db_pin_t;
+
+#define DB_HIGH 1
+#define DB_LOW 0
+
+#else
+
+#error Platform not supported
+
+#endif
 
 // Class Declaration
 // ****************************************************************************
@@ -34,7 +57,7 @@ class Debounce16
 public:
     // Constructors
     // ****************************************************************************
-    Debounce16(uint8_t pin, bool activeLevel = HIGH);
+    Debounce16(db_pin_t pin, bool activeLevel = DB_HIGH);
 
     // Core Debouncing Methods (Always Available)
     // ****************************************************************************
@@ -70,7 +93,7 @@ private:
     // Core Debouncing Members
     // ****************************************************************************
     uint16_t historyButton;                 // 16-bit button state history
-    uint8_t pinButton;                      // GPIO pin number
+    db_pin_t pinButton;                  // GPIO pin number
     bool levelActive;                       // Active logic level (HIGH/LOW)
 
     // State Machine for Press Pattern Detection
@@ -116,12 +139,14 @@ private:
 
     // Bit Pattern Constants (16-bit patterns)
     // ****************************************************************************
-    static const uint16_t MASK_PRESS = 0x003F;       // 0b0000000000111111
-    static const uint16_t PATTERN_PRESS = 0x003F;    // 0b0000000000111111
-    static const uint16_t MASK_RELEASE = 0xFC00;     // 0b1111110000000000
-    static const uint16_t PATTERN_RELEASE = 0xFC00;  // 0b1111110000000000
-    static const uint16_t PATTERN_DOWN = 0xFFFF;     // 0b1111111111111111
-    static const uint16_t PATTERN_UP = 0x0000;       // 0b0000000000000000
+    static const uint16_t MASK_PRESS =      0b1111100000111111;
+    static const uint16_t PATTERN_PRESS =   0b0000000000111111;
+    static const uint16_t MASK_RELEASE =    0b1111100000111111;
+    static const uint16_t PATTERN_RELEASE = 0b1111100000000000;
+
+    static const uint16_t MASK_DOWN_UP =    0b0000000000111111;
+    static const uint16_t PATTERN_DOWN =    0b0000000000111111;
+    static const uint16_t PATTERN_UP =      0b0000000000000000;
 
     // Helper Methods
     // ****************************************************************************
