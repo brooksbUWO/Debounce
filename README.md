@@ -316,18 +316,18 @@ The library uses a 16-bit shift register to store the last 16 button state readi
 
 ### Press Detection Pattern
 
-A press is detected when the last 6 bits are all HIGH (button pressed) after being LOW:
+A press is detected when the latest 6 bits are all HIGH (button pressed) after being LOW (with some possible bounce in between, the "don't cares" being indicated as x):
 ```
-0b0000000000111111 = 0x003F
+0b00000xxxxx111111
 ```
 
 This means the button must be consistently pressed for at least 6ms before being recognized.
 
 ### Release Detection Pattern
 
-A release is detected when the first 6 bits are all HIGH (button was pressed) and the rest are LOW:
+A release is detected when the latest 6 bits are all LOW (button not pressed) and the rest are HIGH (with some possible bounce in between, the "don't cares" being indicated as x):
 ```
-0b1111110000000000 = 0xFC00
+0b11111xxxxx000000
 ```
 
 This provides excellent noise immunity while maintaining fast response times.

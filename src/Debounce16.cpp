@@ -167,7 +167,7 @@ bool Debounce16::isReleased()
 // ****************************************************************************
 bool Debounce16::isDown()
 {
-    return (historyButton == PATTERN_DOWN); // All 16 bits set = button down
+    return (historyButton & MASK_DOWN_UP) == PATTERN_DOWN; // Recent bits are set = button down
 }
 
 // ****************************************************************************
@@ -178,7 +178,7 @@ bool Debounce16::isDown()
 // ****************************************************************************
 bool Debounce16::isUp()
 {
-    return (historyButton == PATTERN_UP);   // All 16 bits clear = button up
+    return (historyButton & MASK_DOWN_UP) == PATTERN_UP;  // Recent bits are clear = button up
 }
 
 // Advanced Feature Configuration Implementation
