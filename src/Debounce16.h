@@ -17,6 +17,7 @@
 // When         Who         Description of change
 // -----------  ----------- -----------------------
 // 30-SEP-2025  Brooks      Initial implementation
+// 28-FEB-2026  davidc      Updates to work under ESP-IDF without Arduino
 //
 // ****************************************************************************
 
@@ -25,7 +26,29 @@
 
 // Include Files
 // ****************************************************************************
+#ifdef ARDUINO
+
 #include <Arduino.h>
+
+typedef uint8_t db_pin_t;
+
+#define DB_HIGH HIGH
+#define DB_LOW LOW
+
+#elifdef IDF_VER
+
+#include "driver/gpio.h"
+
+typedef gpio_num_t db_pin_t;
+
+#define DB_HIGH 1
+#define DB_LOW 0
+
+#else
+
+#error Platform not supported
+
+#endif
 
 // Class Declaration
 // ****************************************************************************
@@ -34,7 +57,7 @@ class Debounce16
 public:
     // Constructors
     // ****************************************************************************
-    Debounce16(uint8_t pin, bool activeLevel = HIGH);
+    Debounce16(db_pin_t pin, bool activeLevel = DB_HIGH);
 
     // Core Debouncing Methods (Always Available)
     // ****************************************************************************
@@ -70,7 +93,7 @@ private:
     // Core Debouncing Members
     // ****************************************************************************
     uint16_t historyButton;                 // 16-bit button state history
-    uint8_t pinButton;                      // GPIO pin number
+    db_pin_t pinButton;                  // GPIO pin number
     bool levelActive;                       // Active logic level (HIGH/LOW)
 
     // State Machine for Press Pattern Detection
