@@ -9,6 +9,7 @@
 // -----------  ----------- -----------------------
 // 30-SEP-2025  Brooks      Initial implementation
 // 28-FEB-2026  davidc      Updates to work under ESP-IDF without Arduino
+// 28-FEB-2026  davidc      Update masks to make press/release/up/down consistent
 //
 // ****************************************************************************
 
