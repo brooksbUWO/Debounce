@@ -2,13 +2,16 @@
 // Title        : Simple Debounce Example (Interrupt)
 // File Name    : 'DebounceSimpleInterrupt.ino'
 // Target MCU   : Espressif ESP32 (Doit DevKit Version 1)
-// Description  : Demonstrates button debouncing using hardware timer interrupt
-//                for precise timing
+// Description  : Demonstrates button debouncing using a hardware timer interrupt
+//                for precise 1ms update timing
+//
+// Requires: ESP32 Arduino core >= 3.0.0
 //
 // Revision History:
 // When         Who         Description of change
 // -----------  ----------- -----------------------
 // 30-SEP-2025  Brooks      Initial example
+// 06-APR-2026  Brooks      Update timer API to ESP32 core v3.x; style fixes
 //
 // ****************************************************************************
 
@@ -18,28 +21,27 @@
 
 // Constants
 // ****************************************************************************
-const uint8_t PIN_BUTTON = 17;                  // Button input pin
-const uint8_t PIN_LED = 15;                     // LED output pin
-const uint16_t INTERVAL_BLINK = 1000;           // Heartbeat blink interval (ms)
+const uint8_t  PIN_BUTTON     = 17;       // Button input pin
+const uint8_t  PIN_LED        = 15;       // LED output pin
+const uint16_t INTERVAL_BLINK = 1000;     // Heartbeat blink interval (ms)
+const uint32_t FREQ_TIMER_HZ  = 1000000;  // Timer frequency: 1 MHz (1 us resolution)
+const uint32_t PERIOD_1MS_US  = 1000;     // Timer alarm period: 1000 us = 1 ms
 
 // Globals
 // ****************************************************************************
-bool stateLed = false;                          // LED toggle state
-bool stateHeartbeat = LOW;                      // Heartbeat LED state
-unsigned long timeBlink = 0;                    // Last heartbeat time
+bool     stateLed       = false;          // LED toggle state
+uint8_t  stateHeartbeat = LOW;            // Heartbeat LED state
+uint32_t timeBlink      = 0;              // Last heartbeat timestamp (ms)
 
-// Hardware timer
-hw_timer_t *timer = NULL;                       // Timer pointer
+hw_timer_t *timer = nullptr;              // Hardware timer handle
 
-// Setup button debouncing
-const bool logicLevel = HIGH;                   // Active HIGH logic
-Debounce16 button(PIN_BUTTON, logicLevel);      // Instantiate debounce object
+Debounce button(PIN_BUTTON, HIGH);        // Active HIGH button; external pull-down required
 
 // Timer Interrupt Service Routine
 // ****************************************************************************
 void IRAM_ATTR onTimer()
 {
-    button.update();                            // Update at precise 1ms intervals
+    button.update();                      // Precise 1ms update; button is ISR-safe
 }
 
 // Setup Code
@@ -51,20 +53,20 @@ void setup()
     Serial.println("Debounce16 Library - Simple Example (Interrupt)");
     Serial.println("================================================");
     Serial.println("- Press button to toggle LED");
-    Serial.println("- Using hardware timer for precise timing");
+    Serial.println("- Hardware timer provides precise 1ms updates");
+    Serial.println("- Requires ESP32 Arduino core >= 3.0.0");
     Serial.println("================================================");
     Serial.println();
 
-    pinMode(PIN_LED, OUTPUT);                   // Configure LED as output
-    digitalWrite(PIN_LED, LOW);                 // Initialize LED to OFF
+    pinMode(PIN_LED, OUTPUT);
+    digitalWrite(PIN_LED, LOW);
 
-    pinMode(LED_BUILTIN, OUTPUT);               // Configure built-in LED
+    pinMode(LED_BUILTIN, OUTPUT);
 
-    // Configure timer interrupt
-    timer = timerBegin(0, 80, true);           // Timer 0, prescaler 80 (1MHz)
-    timerAttachInterrupt(timer, &onTimer, true); // Attach ISR
-    timerAlarmWrite(timer, 1000, true);        // 1000µs = 1ms, auto-reload
-    timerAlarmEnable(timer);                   // Enable timer
+    // Configure hardware timer for 1ms interrupts (ESP32 core v3.x API)
+    timer = timerBegin(FREQ_TIMER_HZ);                   // 1 MHz clock
+    timerAttachInterrupt(timer, &onTimer);                // Attach ISR
+    timerAlarm(timer, PERIOD_1MS_US, true, 0);           // 1ms, auto-reload, unlimited
 
     Serial.println("Timer interrupt configured for 1ms updates");
 }
@@ -73,15 +75,15 @@ void setup()
 // ****************************************************************************
 void loop()
 {
-    unsigned long currentMillis = millis();
+    uint32_t currentMillis = millis();
 
-    // No debounce update needed here - handled by ISR
+    // No debounce update needed here -- handled by ISR
 
     // Check for button press event
     if (button.isPressed())
     {
-        stateLed = !stateLed;                   // Toggle LED state
-        digitalWrite(PIN_LED, stateLed);        // Update physical LED
+        stateLed = !stateLed;
+        digitalWrite(PIN_LED, stateLed);
 
         Serial.print("Button pressed - LED is now: ");
         Serial.println(stateLed ? "ON" : "OFF");
@@ -90,7 +92,7 @@ void loop()
     // Heartbeat indicator
     if (currentMillis - timeBlink >= INTERVAL_BLINK)
     {
-        timeBlink = currentMillis;
+        timeBlink      = currentMillis;
         stateHeartbeat = !stateHeartbeat;
         digitalWrite(LED_BUILTIN, stateHeartbeat);
     }

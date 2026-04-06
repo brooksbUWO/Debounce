@@ -3,12 +3,13 @@
 // File Name    : 'DebounceSimple.ino'
 // Target MCU   : Espressif ESP32 (Doit DevKit Version 1)
 // Description  : Demonstrates basic button debouncing with toggle functionality
-//                using polling-based update method
+//                using the polling-based update method
 //
 // Revision History:
 // When         Who         Description of change
 // -----------  ----------- -----------------------
 // 30-SEP-2025  Brooks      Initial example
+// 06-APR-2026  Brooks      Style fixes: uint32_t, uint8_t heartbeat, class Debounce
 //
 // ****************************************************************************
 
@@ -18,21 +19,19 @@
 
 // Constants
 // ****************************************************************************
-const uint8_t PIN_BUTTON = 17;                  // Button input pin
-const uint8_t PIN_LED = 15;                     // LED output pin
-const uint16_t INTERVAL_BLINK = 1000;           // Heartbeat blink interval (ms)
-const uint16_t INTERVAL_DEBOUNCE = 1;           // Debounce update interval (ms)
+const uint8_t  PIN_BUTTON        = 17;    // Button input pin
+const uint8_t  PIN_LED           = 15;    // LED output pin
+const uint16_t INTERVAL_BLINK    = 1000;  // Heartbeat blink interval (ms)
+const uint16_t INTERVAL_DEBOUNCE = 1;     // Debounce update interval (ms)
 
 // Globals
 // ****************************************************************************
-bool stateLed = false;                          // LED toggle state
-bool stateHeartbeat = LOW;                      // Heartbeat LED state
-unsigned long timeBlink = 0;                    // Last heartbeat time
-unsigned long timeDebounce = 0;                 // Last debounce update time
+bool     stateLed       = false;          // LED toggle state
+uint8_t  stateHeartbeat = LOW;            // Heartbeat LED state (LOW/HIGH are uint8_t macros)
+uint32_t timeBlink      = 0;              // Last heartbeat timestamp (ms)
+uint32_t timeDebounce   = 0;              // Last debounce update timestamp (ms)
 
-// Setup button debouncing with clear parameter usage
-const bool logicLevel = HIGH;                   // Active HIGH logic
-Debounce16 button(PIN_BUTTON, logicLevel);      // Instantiate debounce object
+Debounce button(PIN_BUTTON, HIGH);        // Active HIGH button; external pull-down required
 
 // Setup Code
 // ****************************************************************************
@@ -47,40 +46,40 @@ void setup()
     Serial.println("==============================================");
     Serial.println();
 
-    pinMode(PIN_LED, OUTPUT);                   // Configure LED as output
-    digitalWrite(PIN_LED, LOW);                 // Initialize LED to OFF
+    pinMode(PIN_LED, OUTPUT);
+    digitalWrite(PIN_LED, LOW);
 
-    pinMode(LED_BUILTIN, OUTPUT);               // Configure built-in LED
+    pinMode(LED_BUILTIN, OUTPUT);
 }
 
 // Main Program
 // ****************************************************************************
 void loop()
 {
-    unsigned long currentMillis = millis();
+    uint32_t currentMillis = millis();
 
     // Update debounce state at regular intervals (polling method)
     if (currentMillis - timeDebounce >= INTERVAL_DEBOUNCE)
     {
         timeDebounce = currentMillis;
-        button.update();                        // Update button state every 1ms
+        button.update();
     }
 
     // Check for button press event
     if (button.isPressed())
     {
-        stateLed = !stateLed;                   // Toggle LED state
-        digitalWrite(PIN_LED, stateLed);        // Update physical LED
+        stateLed = !stateLed;
+        digitalWrite(PIN_LED, stateLed);
 
         Serial.print("Button pressed - LED is now: ");
         Serial.println(stateLed ? "ON" : "OFF");
     }
 
-    // Heartbeat indicator (shows system is running)
+    // Heartbeat indicator
     if (currentMillis - timeBlink >= INTERVAL_BLINK)
     {
-        timeBlink = currentMillis;
-        stateHeartbeat = !stateHeartbeat;
+        timeBlink       = currentMillis;
+        stateHeartbeat  = !stateHeartbeat;
         digitalWrite(LED_BUILTIN, stateHeartbeat);
     }
 }
