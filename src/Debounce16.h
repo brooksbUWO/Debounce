@@ -197,6 +197,30 @@ private:
     volatile uint32_t timeEvent;            // Timestamp of last state event (ms, ISR-shared)
     volatile uint32_t timePress;            // Timestamp of press start (ms, ISR-shared)
 
+    /**
+     * @anchor ADR002
+     * @brief ADR 002: Advanced Features Disabled by Default
+     * @details
+     *     Status: ACCEPTED
+     *
+     *     Context: Double-press and long-press detection require a state machine
+     *     that runs inside update(). When both features are disabled, update()
+     *     only maintains the shift register -- no branching, no timing, minimal
+     *     overhead. Enabling both features when only basic debounce is needed
+     *     wastes cycles and adds latency.
+     *
+     *     Decision: flagEnableDoublePress and flagEnableLongPress both default to
+     *     false. The state machine is only entered when at least one feature is
+     *     enabled. Users opt in by calling enableDoublePressDetection() or
+     *     enableLongPressDetection() during setup().
+     *
+     *     Consequences:
+     *     - Positive: Zero state machine overhead for basic debounce use cases.
+     *     - Positive: isSinglePressed() and isLongPressed() always return false
+     *       without explicit opt-in, preventing accidental false positives.
+     *     - Negative: Users who expect advanced features to work without
+     *       configuration will see no events until they call the enable methods.
+     */
     // Feature Configuration (written only from setup(); not ISR-shared)
     // ****************************************************************************
     bool     flagEnableDoublePress;         // Double-press detection enabled
@@ -204,6 +228,62 @@ private:
     uint16_t windowDoublePress;             // Double-press time window (ms, default 300)
     uint16_t thresholdLongPress;            // Long-press time threshold (ms, default 1000)
 
+    /**
+     * @anchor ADR003
+     * @brief ADR 003: Consume-Once Semantics for One-Shot Events
+     * @details
+     *     Status: ACCEPTED
+     *
+     *     Context: isSinglePressed() and isDoublePressed() represent discrete
+     *     events (a confirmed tap or double-tap). If the flag is not cleared on
+     *     read, calling the method multiple times in a single loop() iteration
+     *     returns true on every call, causing the event to be handled more than
+     *     once (e.g., toggling an LED twice for one tap).
+     *
+     *     Decision: isSinglePressed() and isDoublePressed() clear their respective
+     *     flags (flagSinglePressed, flagDoublePressed) after returning true.
+     *     Subsequent calls within the same loop() iteration return false.
+     *     isLongPressed() is intentionally NOT consume-once because long press is
+     *     a continuous state, not a one-shot event: it is expected to return true
+     *     on every call while the button is held.
+     *
+     *     Consequences:
+     *     - Positive: Each discrete press event is delivered exactly once per
+     *       physical action, matching typical UI interaction expectations.
+     *     - Negative: Calling isSinglePressed() twice in the same loop() iteration
+     *       (e.g., in two different conditional branches) will miss the event in
+     *       the second branch. Read the result into a local variable if it must
+     *       be tested more than once.
+     */
+    /**
+     * @anchor ADR005
+     * @brief ADR 005: ISR-Shared Variables Declared volatile
+     * @details
+     *     Status: ACCEPTED
+     *
+     *     Context: update() is designed to be called from a hardware timer ISR
+     *     (see DebounceSimpleInterrupt.ino). Any member written by update() and
+     *     read by loop() is shared between two execution contexts: the ISR and the
+     *     main thread. Without volatile, the compiler may cache shared variables
+     *     in CPU registers and the main thread will read stale values.
+     *
+     *     Decision: All members written inside update() or updateStateMachine() are
+     *     declared volatile: stateButton, timeEvent, timePress, countClick,
+     *     flagSinglePressed, flagDoublePressed, flagLongPressed, flagPressProcessed,
+     *     flagReleaseProcessed. Per the EGRT 390 style guide, the flag prefix
+     *     convention (flagXxx) is RESERVED for ISR-shared event markers and always
+     *     implies volatile.
+     *
+     *     Consequences:
+     *     - Positive: The compiler cannot cache ISR-written values in registers;
+     *       loop() always reads the latest value from memory.
+     *     - Negative: volatile prevents certain compiler optimizations. For
+     *       critical-section operations (e.g., reading a multi-byte value atomically)
+     *       interrupts must be disabled manually; volatile alone is not sufficient.
+     *     - Neutral: flagEnableDoublePress, flagEnableLongPress, windowDoublePress,
+     *       and thresholdLongPress are NOT volatile because they are written only
+     *       during setup() before the timer ISR is enabled.
+     */
     // Event Tracking (written in ISR context via update(); must be volatile)
     // ****************************************************************************
     volatile uint8_t countClick;            // Click counter for current press sequence
@@ -221,6 +301,41 @@ private:
     void (*callbackLongPressStart)();       // Long-press start callback (fires from update())
     void (*callbackLongPressEnd)();         // Long-press end callback (fires from update())
 
+    /**
+     * @anchor ADR001
+     * @brief ADR 001: 16-Bit Shift Register Debounce Algorithm
+     * @details
+     *     Status: ACCEPTED
+     *
+     *     Context: Button contacts bounce for 1-10 ms after press or release,
+     *     producing multiple transitions. A naive level check fires multiple
+     *     events per physical press. Jack Ganssle and Elliot Williams independently
+     *     describe a shift-register pattern-matching approach that accumulates N
+     *     consecutive samples before declaring a stable state.
+     *
+     *     Decision: historyButton is a uint16_t shift register. update() shifts
+     *     left by one and ORs in the current reading on each 1 ms call. Press is
+     *     detected when the 6 LSBs are all HIGH (PATTERN_PRESS = 0x003F), meaning
+     *     6 consecutive pressed readings. Release is detected by
+     *     (historyButton & MASK_RELEASE) == PATTERN_RELEASE: bits 15-10 are HIGH
+     *     (confirming a prior press) and bits 5-0 are LOW (6 consecutive releases),
+     *     with bits 9-6 masked as don't-care to handle held-then-released sequences.
+     *
+     *     Consequences:
+     *     - Positive: 6 ms debounce window eliminates typical mechanical bounce.
+     *     - Positive: No dynamic memory allocation; the shift register is a fixed
+     *       uint16_t member.
+     *     - Negative: update() must be called at exactly 1 ms intervals; timing
+     *       jitter degrades debounce accuracy proportionally.
+     *     - Neutral: The 16-bit width limits history to 16 ms; patterns requiring
+     *       longer histories require a redesigned data structure.
+     *
+     * @see J. Ganssle, "A Guide to Debouncing," 2004.
+     *      https://www.ganssle.com/debouncing.pdf
+     * @see E. Williams, "Embed with Elliot: Debounce Your Noisy Buttons (Part II),"
+     *      Hackaday, Dec. 2015.
+     *      https://hackaday.com/2015/12/10/embed-with-elliot-debounce-your-noisy-buttons-part-ii/
+     */
     // Bit Pattern Constants (16-bit patterns for historyButton matching)
     // ****************************************************************************
     static const uint16_t MASK_PRESS      = 0x003F; // Bits 5-0: press detection mask
@@ -230,6 +345,40 @@ private:
     static const uint16_t PATTERN_DOWN    = 0xFFFF; // 0b1111111111111111: stable held
     static const uint16_t PATTERN_UP      = 0x0000; // 0b0000000000000000: stable released
 
+    /**
+     * @anchor ADR006
+     * @brief ADR 006: State Machine Uses Private Edge Helpers, Not Public API
+     * @details
+     *     Status: ACCEPTED
+     *
+     *     Context: The original updateStateMachine() called the public isPressed()
+     *     and isReleased() methods internally to detect button edges. Those methods
+     *     have side effects: they set flagPressProcessed or flagReleaseProcessed to
+     *     true and fire the onPress/onRelease callbacks. Because the state machine
+     *     runs inside update() (before user code runs in loop()), the side effects
+     *     occurred before the user had a chance to call isPressed()/isReleased().
+     *     The user's subsequent call found the processed flag already set and
+     *     received false -- the event was silently consumed.
+     *
+     *     Decision: Two private methods are introduced:
+     *     - detectPressEdge(): returns (historyButton & MASK_PRESS) == PATTERN_PRESS
+     *       with no side effects on any flags.
+     *     - detectReleaseEdge(): returns (historyButton & MASK_RELEASE) == PATTERN_RELEASE
+     *       with no side effects on any flags.
+     *     updateStateMachine() uses these private helpers exclusively. The public
+     *     isPressed() and isReleased() methods retain full side effects and are
+     *     reserved for user code.
+     *
+     *     Consequences:
+     *     - Positive: isPressed() and isReleased() remain available to user code
+     *       even when advanced features (and therefore the state machine) are active.
+     *     - Positive: The onPress/onRelease callbacks fire only when user code calls
+     *       isPressed()/isReleased(), not from inside update(). This is consistent
+     *       with the documented behavior.
+     *     - Negative: Two additional private methods must be maintained. Their
+     *       return expressions must match the corresponding patterns in
+     *       isPressed()/isReleased() exactly.
+     */
     // Private Helper Methods
     // ****************************************************************************
 

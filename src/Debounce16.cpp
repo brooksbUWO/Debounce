@@ -429,6 +429,36 @@ void Debounce::updateStateMachine()
     }
 }
 
+/**
+ * @anchor ADR004
+ * @brief ADR 004: flagSinglePressed Excluded from resetState()
+ * @details
+ *     Status: ACCEPTED
+ *
+ *     Context: resetState() is called at the end of every successful state
+ *     transition: after a double press is confirmed, after a long press is
+ *     released, and (in the single-press path) after the double-press window
+ *     expires. If resetState() cleared flagSinglePressed, the following sequence
+ *     would silently drop the event:
+ *       1. Window expires -> flagSinglePressed = true, then resetState() called.
+ *       2. resetState() clears flagSinglePressed.
+ *       3. User calls isSinglePressed() in loop() -> returns false.
+ *     The single-press confirmation and the state reset happen within the same
+ *     call to update(). The flag must survive the reset.
+ *
+ *     Decision: resetState() clears stateButton, countClick, flagDoublePressed,
+ *     and flagLongPressed. It does NOT clear flagSinglePressed.
+ *     flagSinglePressed is cleared only by isSinglePressed() after the user reads
+ *     it (consume-once semantics, see @ref ADR003).
+ *
+ *     Consequences:
+ *     - Positive: isSinglePressed() reliably returns true in the loop() iteration
+ *       immediately after the double-press window expires, regardless of when
+ *       in the update() call the reset occurs.
+ *     - Neutral: flagDoublePressed is not subject to the same issue because it is
+ *       set AFTER resetState() is called in the double-press confirmation path.
+ */
+
 // ---
 // resetState -- return state machine to STATE_IDLE and clear transient flags.
 //               NOTE: flagSinglePressed is intentionally NOT cleared here.
