@@ -8,6 +8,8 @@
 // When         Who         Description of change
 // -----------  ----------- -----------------------
 // 30-SEP-2025  Brooks      Initial implementation
+// 06-APR-2026  Brooks      Fix C2 (private edge helpers), C4 (missing break),
+//                          uint32_t timing, remove dead states, // --- comments
 //
 // ****************************************************************************
 
@@ -15,469 +17,439 @@
 // ****************************************************************************
 #include "Debounce16.h"
 
-// Constructor Implementation
-// ****************************************************************************
-Debounce16::Debounce16(uint8_t pin, bool activeLevel)
+// ---
+// Debounce -- constructor. Initializes all members; configures GPIO pin.
+// Params: pin       -- GPIO pin number
+//         activeLevel -- HIGH (active HIGH, INPUT) or LOW (active LOW, INPUT_PULLUP)
+// ---
+Debounce::Debounce(uint8_t pin, bool activeLevel)
 {
-    pinButton = pin;                        // Store GPIO pin number
-    levelActive = activeLevel;              // Store active logic level
-    historyButton = PATTERN_UP;             // Initialize history to UP state
-    stateButton = ButtonState::STATE_IDLE;  // Start in IDLE state
+    pinButton    = pin;                         // Store GPIO pin number
+    levelActive  = activeLevel;                 // Store active logic level
+    historyButton = PATTERN_UP;                 // Initialize history to UP state
+    stateButton  = ButtonState::STATE_IDLE;     // Start in IDLE state
 
-    // Initialize timing variables
-    timeEvent = 0;                          // Reset event timestamp
-    timePress = 0;                          // Reset press timestamp
+    timeEvent = 0;                              // Reset event timestamp
+    timePress = 0;                              // Reset press timestamp
 
-    // Set default timing parameters
-    windowDoublePress = 300;                // 300ms double-press window
-    thresholdLongPress = 1000;              // 1000ms long-press threshold
+    windowDoublePress  = 300;                   // Default: 300ms double-press window
+    thresholdLongPress = 1000;                  // Default: 1000ms long-press threshold
 
-    // Disable advanced features by default
-    flagEnableDoublePress = false;          // Double-press disabled
-    flagEnableLongPress = false;            // Long-press disabled
+    flagEnableDoublePress = false;              // Double-press disabled by default
+    flagEnableLongPress   = false;              // Long-press disabled by default
 
-    // Initialize event tracking flags
-    countClick = 0;                         // Reset click counter
-    flagDoublePressed = false;              // Clear double-press flag
-    flagLongPressed = false;                // Clear long-press flag
-    flagPressProcessed = false;             // Clear press processed flag
-    flagReleaseProcessed = false;           // Clear release processed flag
+    countClick          = 0;                    // Reset click counter
+    flagSinglePressed   = false;                // Clear single-press flag
+    flagDoublePressed   = false;                // Clear double-press flag
+    flagLongPressed     = false;                // Clear long-press flag
+    flagPressProcessed  = false;                // Clear press processed flag
+    flagReleaseProcessed = false;               // Clear release processed flag
 
-    // Initialize all callback pointers to nullptr
-    callbackPress = nullptr;                // No press callback
-    callbackRelease = nullptr;              // No release callback
-    callbackDoublePress = nullptr;          // No double-press callback
-    callbackLongPressStart = nullptr;       // No long-press start callback
-    callbackLongPressEnd = nullptr;         // No long-press end callback
+    callbackPress         = nullptr;            // No press callback
+    callbackRelease       = nullptr;            // No release callback
+    callbackDoublePress   = nullptr;            // No double-press callback
+    callbackLongPressStart = nullptr;           // No long-press start callback
+    callbackLongPressEnd  = nullptr;            // No long-press end callback
 
-    // Configure GPIO pin
     if (levelActive == HIGH)
     {
-        pinMode(pin, INPUT);                // Active HIGH: use INPUT mode
+        pinMode(pin, INPUT);                    // Active HIGH: external pull-down
     }
     else
     {
-        pinMode(pin, INPUT_PULLUP);         // Active LOW: use INPUT_PULLUP
+        pinMode(pin, INPUT_PULLUP);             // Active LOW: internal pull-up
     }
 }
 
-// Core Debouncing Methods Implementation
-// ****************************************************************************
-
-// ****************************************************************************
-// Function: update
-// Purpose:  Update button state (must be called every 1ms)
-// Parameters: None
-// Returns:  None
-// ****************************************************************************
-void Debounce16::update()
+// ---
+// update -- shift new reading into historyButton; run state machine if enabled.
+//           Call once per millisecond. Safe to call from a hardware timer ISR.
+// ---
+void Debounce::update()
 {
-    bool currentState = readButtonRaw();    // Read current button state
-    historyButton = (historyButton << 1) | currentState;  // Shift and add state
+    bool currentState = readButtonRaw();        // Read current button state
+    historyButton = (historyButton << 1) | currentState;  // Shift in new reading
 
-    // Update state machine if advanced features enabled
     if (flagEnableDoublePress || flagEnableLongPress)
     {
-        updateStateMachine();               // Process state transitions
+        updateStateMachine();                   // Run state machine when features active
     }
 }
 
-// ****************************************************************************
-// Function: isPressed
-// Purpose:  Detect button press event (transition from UP to DOWN)
-// Parameters: None
-// Returns:  true if press event detected, false otherwise
-// ****************************************************************************
-bool Debounce16::isPressed()
+// ---
+// isPressed -- detect one press event per physical press.
+//              Fires callbackPress if registered.
+//              NOTE: uses flagPressProcessed to provide consume-once semantics.
+//              The internal state machine uses detectPressEdge() and does NOT
+//              interfere with flagPressProcessed.
+// Returns: true once when press pattern first matches; false until next press.
+// ---
+bool Debounce::isPressed()
 {
-    bool result = false;                    // Default to no press
+    bool result = false;
 
-    // Check for press pattern
     if ((historyButton & MASK_PRESS) == PATTERN_PRESS && !flagPressProcessed)
     {
-        result = true;                      // Press detected
-        flagPressProcessed = true;          // Mark as processed
-
-        // Trigger callback if registered
+        result = true;
+        flagPressProcessed = true;
         triggerCallback(callbackPress);
     }
     else if ((historyButton & MASK_PRESS) != PATTERN_PRESS)
     {
-        flagPressProcessed = false;         // Reset flag when pattern changes
+        flagPressProcessed = false;             // Reset when pattern no longer matches
     }
 
-    return result;                          // Return press detection result
+    return result;
 }
 
-// ****************************************************************************
-// Function: isReleased
-// Purpose:  Detect button release event (transition from DOWN to UP)
-// Parameters: None
-// Returns:  true if release event detected, false otherwise
-// ****************************************************************************
-bool Debounce16::isReleased()
+// ---
+// isReleased -- detect one release event per physical release.
+//               Fires callbackRelease if registered.
+//               NOTE: uses flagReleaseProcessed for consume-once semantics.
+//               The internal state machine uses detectReleaseEdge() and does NOT
+//               interfere with flagReleaseProcessed.
+// Returns: true once when release pattern first matches; false until next release.
+// ---
+bool Debounce::isReleased()
 {
-    bool result = false;                    // Default to no release
+    bool result = false;
 
-    // Check for release pattern
     if ((historyButton & MASK_RELEASE) == PATTERN_RELEASE && !flagReleaseProcessed)
     {
-        result = true;                      // Release detected
-        flagReleaseProcessed = true;        // Mark as processed
-
-        // Trigger callback if registered
+        result = true;
+        flagReleaseProcessed = true;
         triggerCallback(callbackRelease);
     }
     else if ((historyButton & MASK_RELEASE) != PATTERN_RELEASE)
     {
-        flagReleaseProcessed = false;       // Reset flag when pattern changes
+        flagReleaseProcessed = false;           // Reset when pattern no longer matches
     }
 
-    return result;                          // Return release detection result
+    return result;
 }
 
-// ****************************************************************************
-// Function: isDown
-// Purpose:  Check if button is currently being held down
-// Parameters: None
-// Returns:  true if button is down, false otherwise
-// ****************************************************************************
-bool Debounce16::isDown()
+// ---
+// isDown -- check if button is continuously held.
+// Returns: true only when all 16 history bits are HIGH.
+// ---
+bool Debounce::isDown()
 {
-    return (historyButton == PATTERN_DOWN); // All 16 bits set = button down
+    return (historyButton == PATTERN_DOWN);
 }
 
-// ****************************************************************************
-// Function: isUp
-// Purpose:  Check if button is currently released
-// Parameters: None
-// Returns:  true if button is up, false otherwise
-// ****************************************************************************
-bool Debounce16::isUp()
+// ---
+// isUp -- check if button is continuously released.
+// Returns: true only when all 16 history bits are LOW.
+// ---
+bool Debounce::isUp()
 {
-    return (historyButton == PATTERN_UP);   // All 16 bits clear = button up
+    return (historyButton == PATTERN_UP);
 }
 
-// Advanced Feature Configuration Implementation
-// ****************************************************************************
-
-// ****************************************************************************
-// Function: enableDoublePressDetection
-// Purpose:  Enable or disable double-press detection
-// Parameters: enable - true to enable, false to disable
-// Returns:  None
-// ****************************************************************************
-void Debounce16::enableDoublePressDetection(bool enable)
+// ---
+// enableDoublePressDetection -- enable or disable double-press state machine.
+// Params: enable -- true to enable, false to disable
+// ---
+void Debounce::enableDoublePressDetection(bool enable)
 {
-    flagEnableDoublePress = enable;         // Set enable flag
+    flagEnableDoublePress = enable;
 
     if (!enable)
     {
-        // Reset state if disabling
-        countClick = 0;                     // Clear click counter
-        flagDoublePressed = false;          // Clear double-press flag
+        countClick        = 0;                  // Clear click counter on disable
+        flagDoublePressed = false;              // Clear double-press flag
+        flagSinglePressed = false;              // Clear single-press flag
     }
 }
 
-// ****************************************************************************
-// Function: setDoublePressWindow
-// Purpose:  Set time window for double-press detection
-// Parameters: windowMs - time window in milliseconds
-// Returns:  None
-// ****************************************************************************
-void Debounce16::setDoublePressWindow(uint16_t windowMs)
+// ---
+// setDoublePressWindow -- set the time window for double-press detection.
+// Params: windowMs -- window duration in milliseconds
+// ---
+void Debounce::setDoublePressWindow(uint16_t windowMs)
 {
-    windowDoublePress = windowMs;           // Store window value
+    windowDoublePress = windowMs;
 }
 
-// ****************************************************************************
-// Function: enableLongPressDetection
-// Purpose:  Enable or disable long-press detection
-// Parameters: enable - true to enable, false to disable
-// Returns:  None
-// ****************************************************************************
-void Debounce16::enableLongPressDetection(bool enable)
+// ---
+// enableLongPressDetection -- enable or disable long-press state machine.
+// Params: enable -- true to enable, false to disable
+// ---
+void Debounce::enableLongPressDetection(bool enable)
 {
-    flagEnableLongPress = enable;           // Set enable flag
+    flagEnableLongPress = enable;
 
     if (!enable)
     {
-        flagLongPressed = false;            // Clear long-press flag
+        flagLongPressed = false;                // Clear long-press flag on disable
     }
 }
 
-// ****************************************************************************
-// Function: setLongPressThreshold
-// Purpose:  Set duration threshold for long-press detection
-// Parameters: thresholdMs - threshold in milliseconds
-// Returns:  None
-// ****************************************************************************
-void Debounce16::setLongPressThreshold(uint16_t thresholdMs)
+// ---
+// setLongPressThreshold -- set the hold duration required to confirm a long press.
+// Params: thresholdMs -- threshold duration in milliseconds
+// ---
+void Debounce::setLongPressThreshold(uint16_t thresholdMs)
 {
-    thresholdLongPress = thresholdMs;       // Store threshold value
+    thresholdLongPress = thresholdMs;
 }
 
-// Advanced Feature Query Methods Implementation
-// ****************************************************************************
-
-// ****************************************************************************
-// Function: isDoublePressed
-// Purpose:  Check if double-press event has been detected
-// Parameters: None
-// Returns:  true if double-press detected, false otherwise
-// ****************************************************************************
-bool Debounce16::isDoublePressed()
+// ---
+// isSinglePressed -- check if a single-press event has been confirmed.
+//                    Consume-once: clears the flag on read.
+// Returns: true once after the double-press window expires with one click.
+// ---
+bool Debounce::isSinglePressed()
 {
-    bool result = flagDoublePressed;        // Get current flag state
+    bool result = flagSinglePressed;
 
     if (result)
     {
-        flagDoublePressed = false;          // Clear flag after reading
+        flagSinglePressed = false;              // Clear flag after reading
     }
 
-    return result;                          // Return double-press status
+    return result;
 }
 
-// ****************************************************************************
-// Function: isLongPressed
-// Purpose:  Check if long-press is currently active
-// Parameters: None
-// Returns:  true if long-press active, false otherwise
-// ****************************************************************************
-bool Debounce16::isLongPressed()
+// ---
+// isDoublePressed -- check if a double-press event has been confirmed.
+//                    Consume-once: clears the flag on read.
+// Returns: true once after two presses within the detection window.
+// ---
+bool Debounce::isDoublePressed()
 {
-    return flagLongPressed;                 // Return long-press flag state
+    bool result = flagDoublePressed;
+
+    if (result)
+    {
+        flagDoublePressed = false;              // Clear flag after reading
+    }
+
+    return result;
 }
 
-// ****************************************************************************
-// Function: getClickCount
-// Purpose:  Get current click count
-// Parameters: None
-// Returns:  Number of clicks detected
-// ****************************************************************************
-uint8_t Debounce16::getClickCount()
+// ---
+// isLongPressed -- check if a long press is currently active.
+//                  NOT consume-once: returns true on every read while held.
+// Returns: true while button is held past the long-press threshold.
+// ---
+bool Debounce::isLongPressed()
 {
-    uint8_t result = countClick;            // Get current count
+    return flagLongPressed;
+}
+
+// ---
+// getClickCount -- return the current click count within the detection window.
+//                  Resets to 0 when state returns to IDLE.
+// Returns: number of clicks counted; 0 after the window expires.
+// ---
+uint8_t Debounce::getClickCount()
+{
+    uint8_t result = countClick;
 
     if (countClick > 0 && stateButton == ButtonState::STATE_IDLE)
     {
-        countClick = 0;                     // Reset count after reading in IDLE
+        countClick = 0;                         // Reset count after reading in IDLE
     }
 
-    return result;                          // Return click count
+    return result;
 }
 
-// Callback Registration Implementation
-// ****************************************************************************
-
-// ****************************************************************************
-// Function: onPress
-// Purpose:  Register callback for press event
-// Parameters: callback - function pointer to callback
-// Returns:  None
-// ****************************************************************************
-void Debounce16::onPress(void (*callback)())
+// ---
+// onPress -- register callback for press events.
+// Params: callback -- function pointer; nullptr removes the callback
+// ---
+void Debounce::onPress(void (*callback)())
 {
-    callbackPress = callback;               // Store callback pointer
+    callbackPress = callback;
 }
 
-// ****************************************************************************
-// Function: onRelease
-// Purpose:  Register callback for release event
-// Parameters: callback - function pointer to callback
-// Returns:  None
-// ****************************************************************************
-void Debounce16::onRelease(void (*callback)())
+// ---
+// onRelease -- register callback for release events.
+// Params: callback -- function pointer; nullptr removes the callback
+// ---
+void Debounce::onRelease(void (*callback)())
 {
-    callbackRelease = callback;             // Store callback pointer
+    callbackRelease = callback;
 }
 
-// ****************************************************************************
-// Function: onDoublePress
-// Purpose:  Register callback for double-press event
-// Parameters: callback - function pointer to callback
-// Returns:  None
-// ****************************************************************************
-void Debounce16::onDoublePress(void (*callback)())
+// ---
+// onDoublePress -- register callback for double-press events.
+//                  Fires automatically from update(); no polling required.
+// Params: callback -- function pointer; nullptr removes the callback
+// ---
+void Debounce::onDoublePress(void (*callback)())
 {
-    callbackDoublePress = callback;         // Store callback pointer
+    callbackDoublePress = callback;
 }
 
-// ****************************************************************************
-// Function: onLongPressStart
-// Purpose:  Register callback for long-press start event
-// Parameters: callback - function pointer to callback
-// Returns:  None
-// ****************************************************************************
-void Debounce16::onLongPressStart(void (*callback)())
+// ---
+// onLongPressStart -- register callback for long-press start events.
+//                     Fires automatically from update(); no polling required.
+// Params: callback -- function pointer; nullptr removes the callback
+// ---
+void Debounce::onLongPressStart(void (*callback)())
 {
-    callbackLongPressStart = callback;      // Store callback pointer
+    callbackLongPressStart = callback;
 }
 
-// ****************************************************************************
-// Function: onLongPressEnd
-// Purpose:  Register callback for long-press end event
-// Parameters: callback - function pointer to callback
-// Returns:  None
-// ****************************************************************************
-void Debounce16::onLongPressEnd(void (*callback)())
+// ---
+// onLongPressEnd -- register callback for long-press end events.
+//                   Fires automatically from update(); no polling required.
+// Params: callback -- function pointer; nullptr removes the callback
+// ---
+void Debounce::onLongPressEnd(void (*callback)())
 {
-    callbackLongPressEnd = callback;        // Store callback pointer
+    callbackLongPressEnd = callback;
 }
 
-// Helper Methods Implementation
-// ****************************************************************************
-
-// ****************************************************************************
-// Function: readButtonRaw
-// Purpose:  Read current physical button state accounting for active level
-// Parameters: None
-// Returns:  true if button pressed, false if released
-// ****************************************************************************
-bool Debounce16::readButtonRaw()
+// ---
+// readButtonRaw -- read physical pin state, accounting for active logic level.
+// Returns: true if button is pressed; false if released.
+// ---
+bool Debounce::readButtonRaw()
 {
-    bool stateRaw = digitalRead(pinButton); // Read physical button state
+    bool stateRaw = digitalRead(pinButton);
 
-    // Account for active logic level
     if (levelActive == HIGH)
     {
-        return stateRaw;                    // Active HIGH: return as-is
+        return stateRaw;                        // Active HIGH: return as-is
     }
     else
     {
-        return !stateRaw;                   // Active LOW: invert
+        return !stateRaw;                       // Active LOW: invert
     }
 }
 
-// ****************************************************************************
-// Function: updateStateMachine
-// Purpose:  Process state transitions for advanced press pattern detection
-// Parameters: None
-// Returns:  None
-// ****************************************************************************
-void Debounce16::updateStateMachine()
+// ---
+// detectPressEdge -- check if the press pattern is present in historyButton.
+//                    No side effects: does not touch flagPressProcessed and does
+//                    not fire any callbacks. Used internally by the state machine
+//                    so that isPressed() remains available to user code.
+// Returns: true when (historyButton & MASK_PRESS) == PATTERN_PRESS.
+// ---
+bool Debounce::detectPressEdge()
 {
-    unsigned long currentTime = millis();   // Get current time
-    unsigned long timeElapsed;              // Time elapsed variable
+    return (historyButton & MASK_PRESS) == PATTERN_PRESS;
+}
 
-    // State machine logic
+// ---
+// detectReleaseEdge -- check if the release pattern is present in historyButton.
+//                      No side effects: does not touch flagReleaseProcessed and
+//                      does not fire any callbacks. Used internally by the state
+//                      machine so that isReleased() remains available to user code.
+// Returns: true when (historyButton & MASK_RELEASE) == PATTERN_RELEASE.
+// ---
+bool Debounce::detectReleaseEdge()
+{
+    return (historyButton & MASK_RELEASE) == PATTERN_RELEASE;
+}
+
+// ---
+// updateStateMachine -- process state transitions for press pattern detection.
+//                       Called from update() when advanced features are enabled.
+//                       Uses detectPressEdge() and detectReleaseEdge() instead of
+//                       isPressed()/isReleased() to avoid consuming user-visible events.
+// ---
+void Debounce::updateStateMachine()
+{
+    uint32_t currentTime = millis();
+    uint32_t timeElapsed;
+
     switch (stateButton)
     {
         case ButtonState::STATE_IDLE:
-            // Waiting for button press
-            if (isPressed())
+            if (detectPressEdge())              // No side effects on flagPressProcessed
             {
-                timePress = currentTime;    // Record press timestamp
-                countClick = 1;             // First click
-                stateButton = ButtonState::STATE_PRESS_FIRST;  // Move to press state
+                timePress   = currentTime;      // Record press start timestamp
+                countClick  = 1;                // First click
+                stateButton = ButtonState::STATE_PRESS_FIRST;
             }
             break;
 
         case ButtonState::STATE_PRESS_FIRST:
-            // First press detected, checking for release or long press
             if (flagEnableLongPress)
             {
-                timeElapsed = currentTime - timePress;  // Calculate press duration
+                timeElapsed = currentTime - timePress;
 
                 if (timeElapsed >= thresholdLongPress && !flagLongPressed)
                 {
-                    // Long press threshold reached
-                    flagLongPressed = true;  // Set long-press flag
-                    stateButton = ButtonState::STATE_LONG_PRESS_ACTIVE;  // Move to long-press state
-                    triggerCallback(callbackLongPressStart);  // Trigger start callback
+                    flagLongPressed = true;
+                    stateButton     = ButtonState::STATE_LONG_PRESS_ACTIVE;
+                    triggerCallback(callbackLongPressStart);
+                    break;                      // Do not evaluate release in same tick (C4 fix)
                 }
             }
 
-            if (isReleased())
+            if (detectReleaseEdge())            // No side effects on flagReleaseProcessed
             {
-                timeEvent = currentTime;    // Record release timestamp
+                timeEvent = currentTime;        // Record release timestamp
 
                 if (flagLongPressed)
                 {
-                    // Was a long press, return to idle
-                    resetState();           // Reset to idle state
+                    resetState();               // Long press already handled; return to idle
                 }
                 else if (flagEnableDoublePress)
                 {
-                    // Check for double press
-                    stateButton = ButtonState::STATE_RELEASE_FIRST;  // Move to release state
+                    stateButton = ButtonState::STATE_RELEASE_FIRST;
                 }
                 else
                 {
-                    // No double-press detection, return to idle
-                    resetState();           // Reset to idle state
+                    resetState();
                 }
             }
             break;
 
         case ButtonState::STATE_RELEASE_FIRST:
-            // First release detected, waiting for second press
-            timeElapsed = currentTime - timeEvent;  // Calculate time since release
+            timeElapsed = currentTime - timeEvent;
 
-            if (isPressed() && timeElapsed < windowDoublePress)
+            if (detectPressEdge() && timeElapsed < windowDoublePress)
             {
-                // Second press within window
-                countClick = 2;             // Second click
-                timePress = currentTime;    // Record second press time
-                stateButton = ButtonState::STATE_PRESS_FIRST;  // Back to press state
+                // Second press within window: double press confirmed
+                resetState();                   // resetState clears flagDoublePressed
+                flagDoublePressed = true;       // Set flag AFTER reset
+                triggerCallback(callbackDoublePress);
             }
             else if (timeElapsed >= windowDoublePress)
             {
-                // Window expired, single click confirmed
-                if (countClick == 2)
-                {
-                    // Was a double press
-                    flagDoublePressed = true;  // Set double-press flag
-                    triggerCallback(callbackDoublePress);  // Trigger callback
-                }
-                resetState();               // Return to idle
+                // Window expired with one press: single press confirmed
+                flagSinglePressed = true;
+                resetState();
             }
             break;
 
         case ButtonState::STATE_LONG_PRESS_ACTIVE:
-            // Long press is active, waiting for release
-            if (isReleased())
+            if (detectReleaseEdge())            // No side effects on flagReleaseProcessed
             {
-                flagLongPressed = false;    // Clear long-press flag
-                triggerCallback(callbackLongPressEnd);  // Trigger end callback
-                resetState();               // Return to idle
+                flagLongPressed = false;
+                triggerCallback(callbackLongPressEnd);
+                resetState();
             }
-            break;
-
-        case ButtonState::STATE_WAIT_DOUBLE_PRESS:
-            // Reserved for future use
-            break;
-
-        case ButtonState::STATE_WAIT_LONG_PRESS:
-            // Reserved for future use
             break;
     }
 }
 
-// ****************************************************************************
-// Function: resetState
-// Purpose:  Reset state machine to idle state
-// Parameters: None
-// Returns:  None
-// ****************************************************************************
-void Debounce16::resetState()
+// ---
+// resetState -- return state machine to STATE_IDLE and clear transient flags.
+//               NOTE: flagSinglePressed is intentionally NOT cleared here.
+//               It must survive the reset so user code can read it in loop().
+// ---
+void Debounce::resetState()
 {
-    stateButton = ButtonState::STATE_IDLE;  // Return to idle state
-    countClick = 0;                         // Reset click counter
-    flagDoublePressed = false;              // Clear double-press flag
-    flagLongPressed = false;                // Clear long-press flag
+    stateButton       = ButtonState::STATE_IDLE;
+    countClick        = 0;
+    flagDoublePressed = false;
+    flagLongPressed   = false;
 }
 
-// ****************************************************************************
-// Function: triggerCallback
-// Purpose:  Execute callback if registered
-// Parameters: callback - function pointer to callback
-// Returns:  None
-// ****************************************************************************
-void Debounce16::triggerCallback(void (*callback)())
+// ---
+// triggerCallback -- execute a callback function pointer if it is not nullptr.
+// Params: callback -- function pointer to call
+// ---
+void Debounce::triggerCallback(void (*callback)())
 {
-    if (callback != nullptr)                // Check if callback registered
+    if (callback != nullptr)
     {
-        callback();                         // Execute callback function
+        callback();
     }
 }
