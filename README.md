@@ -1,4 +1,4 @@
-# Debounce16 Library
+# Debounce Library
 
 A robust 16-bit pattern-based button debouncing library for ESP32 microcontrollers using the Arduino framework.
 
@@ -55,7 +55,7 @@ VCC ----[10kΩ]---- GPIO_PIN
 Or use internal pull-up:
 ```cpp
 // Library automatically configures INPUT_PULLUP for active LOW
-Debounce16 button(PIN_BUTTON, LOW);
+Debounce button(PIN_BUTTON, LOW);
 ```
 
 ## Basic Usage
@@ -68,7 +68,7 @@ Debounce16 button(PIN_BUTTON, LOW);
 const uint8_t PIN_BUTTON = 17;
 const uint8_t PIN_LED = 15;
 
-Debounce16 button(PIN_BUTTON, HIGH);  // Active HIGH
+Debounce button(PIN_BUTTON, HIGH);  // Active HIGH
 
 void setup() {
     pinMode(PIN_LED, OUTPUT);
@@ -96,20 +96,19 @@ void loop() {
 #include <Debounce16.h>
 
 const uint8_t PIN_BUTTON = 17;
-Debounce16 button(PIN_BUTTON, HIGH);
+Debounce button(PIN_BUTTON, HIGH);
 
-hw_timer_t *timer = NULL;
+hw_timer_t *timer = nullptr;
 
 void IRAM_ATTR onTimer() {
     button.update();  // Update at precise 1ms intervals
 }
 
 void setup() {
-    // Configure timer for 1ms interrupts
-    timer = timerBegin(0, 80, true);
-    timerAttachInterrupt(timer, &onTimer, true);
-    timerAlarmWrite(timer, 1000, true);
-    timerAlarmEnable(timer);
+    // Configure timer for 1ms interrupts (requires ESP32 Arduino core >= 3.0.0)
+    timer = timerBegin(1000000);              // 1 MHz timer clock
+    timerAttachInterrupt(timer, &onTimer);    // Attach ISR
+    timerAlarm(timer, 1000, true, 0);         // 1000 us = 1ms, auto-reload
 }
 
 void loop() {
@@ -126,7 +125,7 @@ void loop() {
 ```cpp
 #include <Debounce16.h>
 
-Debounce16 button(17, HIGH);
+Debounce button(17, HIGH);
 
 void setup() {
     button.enableDoublePressDetection(true);
@@ -140,12 +139,12 @@ void loop() {
         // Handle double press
     }
 
-    // Or check click count
-    uint8_t clicks = button.getClickCount();
-    if (clicks == 1) {
-        // Single press
-    } else if (clicks == 2) {
-        // Double press
+    // Prefer the dedicated query methods for correct consume-once behavior
+    if (button.isSinglePressed()) {
+        // Single press confirmed (window expired with one tap)
+    }
+    if (button.isDoublePressed()) {
+        // Double press confirmed
     }
 }
 ```
@@ -155,7 +154,7 @@ void loop() {
 ```cpp
 #include <Debounce16.h>
 
-Debounce16 button(17, HIGH);
+Debounce button(17, HIGH);
 
 void setup() {
     button.enableLongPressDetection(true);
@@ -176,7 +175,7 @@ void loop() {
 ```cpp
 #include <Debounce16.h>
 
-Debounce16 button(17, HIGH);
+Debounce button(17, HIGH);
 
 void onButtonPress() {
     Serial.println("Button pressed!");
@@ -190,10 +189,17 @@ void setup() {
     Serial.begin(115200);
     button.onPress(onButtonPress);
     button.onRelease(onButtonRelease);
+    // IMPORTANT: onPress and onRelease callbacks only fire when isPressed() or
+    // isReleased() is called explicitly from loop(). Without those calls,
+    // the callbacks will never execute.
+    // onDoublePress, onLongPressStart, and onLongPressEnd fire automatically
+    // from update() without any polling required.
 }
 
 void loop() {
     button.update();
+    button.isPressed();    // Required to fire onPress callback
+    button.isReleased();   // Required to fire onRelease callback
 }
 ```
 
@@ -202,7 +208,7 @@ void loop() {
 ### Constructor
 
 ```cpp
-Debounce16(uint8_t pin, bool activeLevel = HIGH)
+Debounce(uint8_t pin, bool activeLevel = HIGH)
 ```
 
 - `pin`: GPIO pin number where button is connected
@@ -230,9 +236,10 @@ void setLongPressThreshold(uint16_t thresholdMs)
 ### Advanced Query Methods
 
 ```cpp
+bool isSinglePressed()           // Returns true once per confirmed single tap (consume-once)
 bool isDoublePressed()           // Returns true on double-press event
 bool isLongPressed()             // Returns true when long-press active
-uint8_t getClickCount()          // Returns current click count
+uint8_t getClickCount()          // Returns current click count (deprecated)
 ```
 
 ### Callback Registration
@@ -260,12 +267,13 @@ This means the button must be consistently pressed for at least 6ms before being
 
 ### Release Detection Pattern
 
-A release is detected when the first 6 bits are all HIGH (button was pressed) and the rest are LOW:
+A release is detected by masking historyButton against MASK_RELEASE and comparing to PATTERN_RELEASE:
 ```
-0b1111110000000000 = 0xFC00
+MASK_RELEASE    = 0b1111110000111111 = 0xFC3F
+PATTERN_RELEASE = 0b1111110000000000 = 0xFC00
 ```
 
-This provides excellent noise immunity while maintaining fast response times.
+Bits 15-10 must be HIGH (6 consecutive pressed readings confirming a prior press). Bits 5-0 must be LOW (6 consecutive released readings). Bits 9-6 are masked as don't-care to handle the transition bits that occur between the press and release windows. This is stricter than a simple level check and provides excellent noise immunity.
 
 ## Theory and Background
 
